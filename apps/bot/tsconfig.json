@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@supper-bot/types": ["../../packages/types/src/index.ts"],
+      "@supper-bot/types/*": ["../../packages/types/src/*"]
+    }
+  },
+  "include": ["src/**/*", "drizzle.config.ts"]
+}

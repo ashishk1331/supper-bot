@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun --version)",
+      "Bash(pnpm --version)",
+      "PowerShell(bun *)",
+      "PowerShell(Stop-Process *)"
+    ]
+  }
+}
