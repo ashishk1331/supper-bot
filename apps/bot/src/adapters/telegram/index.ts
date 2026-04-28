@@ -4,7 +4,7 @@ import type { ChannelAdapter } from "../base"
 export class TelegramAdapter implements ChannelAdapter {
   readonly platform = "telegram" as const
 
-  parseIncoming(_event: unknown): UnifiedEvent | null {
+  async parseIncoming(_event: unknown): Promise<UnifiedEvent | null> {
     // TODO: implement Telegram event parsing via grammy
     return null
   }

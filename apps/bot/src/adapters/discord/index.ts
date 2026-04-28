@@ -4,7 +4,7 @@ import type { ChannelAdapter } from "../base"
 export class DiscordAdapter implements ChannelAdapter {
   readonly platform = "discord" as const
 
-  parseIncoming(_event: unknown): UnifiedEvent | null {
+  async parseIncoming(_event: unknown): Promise<UnifiedEvent | null> {
     // TODO: implement Discord event parsing via discord.js
     return null
   }
