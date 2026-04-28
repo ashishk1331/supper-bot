@@ -1,6 +1,6 @@
+import { loadConfig } from "@/lib/config"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
-import { loadConfig } from "@/lib/config"
 import * as schema from "./schema"
 
 let cachedClient: ReturnType<typeof postgres> | null = null

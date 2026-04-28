@@ -1,13 +1,6 @@
 export type Platform = "slack" | "discord" | "telegram"
 
-export type TriggerType =
-  | "mention"
-  | "reply"
-  | "quote"
-  | "thread"
-  | "reaction"
-  | "order_ref"
-  | "dm"
+export type TriggerType = "mention" | "reply" | "quote" | "thread" | "reaction" | "order_ref" | "dm"
 
 export interface AmbientMessage {
   messageId: string

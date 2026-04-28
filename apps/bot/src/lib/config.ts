@@ -80,7 +80,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (cached) return cached
   const parsed = ConfigSchema.safeParse(env)
   if (!parsed.success) {
-    const issues = parsed.error.issues.map((i) => `  • ${i.path.join(".") || "(root)"}: ${i.message}`).join("\n")
+    const issues = parsed.error.issues
+      .map((i) => `  • ${i.path.join(".") || "(root)"}: ${i.message}`)
+      .join("\n")
     throw new Error(`Invalid environment configuration:\n${issues}`)
   }
   cached = parsed.data

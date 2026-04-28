@@ -4,7 +4,8 @@
       "Bash(bun --version)",
       "Bash(pnpm --version)",
       "PowerShell(bun *)",
-      "PowerShell(Stop-Process *)"
+      "PowerShell(Stop-Process *)",
+      "Bash(xargs grep *)"
     ]
   }
 }

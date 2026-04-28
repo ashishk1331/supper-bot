@@ -1,6 +1,6 @@
 import type { UnifiedEvent } from "./events"
-import type { ActiveChatWindow, OrderSession } from "./session"
 import type { GroupContext, UserContext } from "./memory"
+import type { ActiveChatWindow, OrderSession } from "./session"
 
 export interface ToolDefinitionMeta {
   name: string

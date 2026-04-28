@@ -1,5 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk"
 import { loadConfig } from "@/lib/config"
+import Anthropic from "@anthropic-ai/sdk"
 
 let cached: Anthropic | null = null
 

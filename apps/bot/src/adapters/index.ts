@@ -1,8 +1,8 @@
 import { loadConfig } from "@/lib/config"
 import { getLogger } from "@/lib/logger"
 import type { ChannelAdapter } from "./base"
-import { SlackAdapter } from "./slack"
 import { DiscordAdapter } from "./discord"
+import { SlackAdapter } from "./slack"
 import { TelegramAdapter } from "./telegram"
 
 export type { ChannelAdapter } from "./base"

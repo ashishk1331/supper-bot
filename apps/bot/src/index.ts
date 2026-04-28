@@ -1,10 +1,11 @@
 ﻿import { buildEnabledAdapters } from "@/adapters"
-import { startWorkers, stopWorkers } from "@/queue/worker"
-import { registerSessionTools } from "@/tools/session"
-import { registerMemoryTools } from "@/tools/memory"
-import { registerSwiggyTools } from "@/tools/swiggy"
 import { loadConfig } from "@/lib/config"
 import { getLogger } from "@/lib/logger"
+import { closeRedis, getRedis } from "@/lib/redis"
+import { startWorkers, stopWorkers } from "@/queue/worker"
+import { registerMemoryTools } from "@/tools/memory"
+import { registerSessionTools } from "@/tools/session"
+import { registerSwiggyTools } from "@/tools/swiggy"
 
 async function main() {
   const config = loadConfig()
@@ -19,6 +20,9 @@ async function main() {
     },
     "supper-bot booting",
   )
+
+  // Initialise Redis (FalkorDB) eagerly so misconfiguration fails fast.
+  getRedis()
 
   registerSessionTools()
   registerMemoryTools()
@@ -50,6 +54,7 @@ async function main() {
     server.stop()
     await stopWorkers()
     await Promise.all(adapters.map((a) => a.stop()))
+    await closeRedis()
     process.exit(0)
   }
 
