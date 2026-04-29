@@ -54,7 +54,14 @@ export interface OrderSession {
   members: Record<string, MemberCart>
   trackedMessages: Record<string, TrackedMessage>
 
-  idempotencyKey: string
+  /**
+   * Set by the LLM via `session_track_next_response` to declare that the
+   * orchestrator's NEXT outbound message should be registered as a tracked
+   * message with this intent. Cleared by the orchestrator after writing the
+   * tracked-message record. Only meaningful for the current turn.
+   */
+  pendingTrackIntent?: TrackedMessage["intent"]
+
   swiggyOrderId?: string
 
   createdAt: Date

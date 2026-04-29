@@ -1,3 +1,4 @@
+import { registerAdapter, unregisterAdapter } from "@/adapters/registry"
 import { loadConfig } from "@/lib/config"
 import { AdapterError } from "@/lib/errors"
 import { extractOrderRefs } from "@/lib/id"
@@ -14,7 +15,7 @@ import type {
   UnifiedMessage,
   UnifiedReaction,
 } from "@supper-bot/types"
-import type { ChannelAdapter } from "../base"
+import type { ChannelAdapter, SendResult } from "../base"
 import { renderSlack } from "./renderer"
 import { type SlackMessageShape, detectSlackTrigger } from "./trigger-detector"
 
@@ -63,15 +64,17 @@ export class SlackAdapter implements ChannelAdapter {
     return null
   }
 
-  async sendMessage(target: ChannelTarget, content: AgentResponse): Promise<void> {
+  async sendMessage(target: ChannelTarget, content: AgentResponse): Promise<SendResult> {
     if (!this.app) throw new AdapterError("slack", "adapter not started")
     const rendered = renderSlack(content)
-    await this.app.client.chat.postMessage({
+    const result = await this.app.client.chat.postMessage({
       channel: target.groupId,
       text: rendered.text,
       blocks: rendered.blocks,
       ...(target.threadId ? { thread_ts: target.threadId } : {}),
     })
+    if (!result.ts) throw new AdapterError("slack", "chat.postMessage returned no ts")
+    return { messageId: result.ts }
   }
 
   async start(): Promise<void> {
@@ -126,10 +129,12 @@ export class SlackAdapter implements ChannelAdapter {
     })
 
     await this.app.start()
+    registerAdapter(this)
     log.info({ botUserId: this.botMeta.userId }, "slack adapter connected")
   }
 
   async stop(): Promise<void> {
+    unregisterAdapter("slack")
     if (this.app) {
       await this.app.stop()
       this.app = null

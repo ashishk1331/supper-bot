@@ -11,12 +11,6 @@ export interface AmbientMessage {
   replyTo?: string
 }
 
-export interface AmbientBuffer {
-  groupId: string
-  platform: Platform
-  messages: AmbientMessage[]
-}
-
 export interface UnifiedMessage {
   type: "message"
   platform: Platform

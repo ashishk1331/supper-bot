@@ -2,6 +2,7 @@
 import { loadConfig } from "@/lib/config"
 import { getLogger } from "@/lib/logger"
 import { closeRedis, getRedis } from "@/lib/redis"
+import { closeMcpClients } from "@/mcp/client"
 import { startWorkers, stopWorkers } from "@/queue/worker"
 import { registerMemoryTools } from "@/tools/memory"
 import { registerSessionTools } from "@/tools/session"
@@ -54,6 +55,7 @@ async function main() {
     server.stop()
     await stopWorkers()
     await Promise.all(adapters.map((a) => a.stop()))
+    await closeMcpClients()
     await closeRedis()
     process.exit(0)
   }

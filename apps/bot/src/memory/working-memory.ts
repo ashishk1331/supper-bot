@@ -3,11 +3,12 @@ import { getRedis } from "@/lib/redis"
 import { estimateJsonTokens } from "@/lib/token-counter"
 import {
   ambientKey,
-  rateLimitKey,
   sessionActiveKey,
   sessionChatKey,
+  sessionChatLockKey,
   trackedMessageIndexKey,
 } from "@/memory/keys"
+import { withLock } from "@/memory/locks"
 import {
   deserializeAmbientMessage,
   deserializeChatWindow,
@@ -25,14 +26,16 @@ import type {
   TrackedMessage,
 } from "@supper-bot/types"
 
-const AMBIENT_TTL_SECONDS = 30 * 60
-
 function sessionTtlSeconds(): number {
   return loadConfig().SESSION_TIMEOUT_MINUTES * 60
 }
 
 function ambientCapacity(): number {
   return loadConfig().AMBIENT_BUFFER_SIZE
+}
+
+function ambientTtlSeconds(): number {
+  return loadConfig().AMBIENT_BUFFER_TTL_MINUTES * 60
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────
@@ -86,20 +89,24 @@ export async function appendMessage(
   groupId: string,
   message: ChatMessage,
 ): Promise<ActiveChatWindow> {
-  const existing =
-    (await getChatWindow(sessionId)) ??
-    ({
-      sessionId,
-      groupId,
-      messages: [],
-      tokenEstimate: 0,
-      compactionHistory: [],
-      summaries: [],
-    } satisfies ActiveChatWindow)
-  existing.messages.push(message)
-  existing.tokenEstimate += estimateJsonTokens(message)
-  await replaceChatWindow(existing)
-  return existing
+  // Lock the read-modify-write so concurrent appends (cross-instance, or
+  // the orchestrator + session manager racing) don't lose messages.
+  return withLock(sessionChatLockKey(sessionId), async () => {
+    const existing =
+      (await getChatWindow(sessionId)) ??
+      ({
+        sessionId,
+        groupId,
+        messages: [],
+        tokenEstimate: 0,
+        compactionHistory: [],
+        summaries: [],
+      } satisfies ActiveChatWindow)
+    existing.messages.push(message)
+    existing.tokenEstimate += estimateJsonTokens(message)
+    await replaceChatWindow(existing)
+    return existing
+  })
 }
 
 // ── Ambient buffer ────────────────────────────────────────────────────
@@ -115,7 +122,7 @@ export async function pushAmbientMessage(
   const pipeline = redis.multi()
   pipeline.lpush(key, serializeAmbientMessage(msg))
   pipeline.ltrim(key, 0, cap - 1)
-  pipeline.expire(key, AMBIENT_TTL_SECONDS)
+  pipeline.expire(key, ambientTtlSeconds())
   await pipeline.exec()
 }
 
@@ -126,29 +133,6 @@ export async function getAmbientBuffer(
   const raws = await getRedis().lrange(ambientKey(platform, groupId), 0, -1)
   // LPUSH stores newest first; reverse so callers receive chronological order.
   return raws.map(deserializeAmbientMessage).reverse()
-}
-
-// ── Rate limiting ─────────────────────────────────────────────────────
-
-export interface RateLimitResult {
-  count: number
-  allowed: boolean
-}
-
-export async function incrementRateLimit(
-  platform: Platform,
-  userId: string,
-  options: { windowSeconds?: number; max?: number } = {},
-): Promise<RateLimitResult> {
-  const windowSeconds = options.windowSeconds ?? 60
-  const max = options.max ?? 3
-  const redis = getRedis()
-  const key = rateLimitKey(platform, userId)
-  const count = await redis.incr(key)
-  if (count === 1) {
-    await redis.expire(key, windowSeconds)
-  }
-  return { count, allowed: count <= max }
 }
 
 // ── Tracked messages ──────────────────────────────────────────────────

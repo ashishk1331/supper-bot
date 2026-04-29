@@ -275,9 +275,11 @@ Simple reactions — confirm / opt-out — are handled directly by the session m
 interface SilenceRules {
   ignoreOtherBots: true
   ignoreUntrackedReactions: true
-  ignoreBurstFromSameUser: true     // handled by rate limiter (3+ msgs, no reply yet)
+  coalesceBurstsPerGroup: true       // see §7.4 — bursts collapse into one LLM turn
 }
 ```
+
+Bursts of triggered messages from the same group are not rate-limited; instead they are **coalesced** by the orchestrator (§7.4) so all bursted messages contribute to a single surviving LLM turn.
 
 ### 4.8 Platform Feature Matrix
 
@@ -413,7 +415,6 @@ interface OrderSession {
 
   trackedMessages: Record<string, TrackedMessage>
 
-  idempotencyKey: string            // generated at PLACING, prevents double-orders
   swiggyOrderId?: string
 
   createdAt: Date
@@ -528,6 +529,36 @@ Known conflicts: {conflict_history}
 - Simple confirmations (reactions) do not need a text response
 ```
 
+### 7.4 Burst Coalescer (interrupt-style)
+
+The orchestrator does **not** rate-limit bursting users. Instead, it treats overlapping triggered messages as interrupts — analogous to interrupt coalescing in computer architecture, where a flood of identical signals reduces to a single handler invocation against the latest state.
+
+```
+Worker pulls UnifiedMessage from queue
+        ↓
+1. ensureSession + appendMessage(user)             ← always runs, even for bursted msgs
+        ↓
+2. enter coalesce(platform, groupId, fn):
+   ├─ if a previous turn is in flight for this group:
+   │     • abort its AbortController          (propagated to client.messages.create)
+   │     • sleep JITTER_BASE_MS + rand(JITTER_RANGE_MS)
+   │     • if a newer message took our slot during jitter → exit silently
+   ↓
+3. fn(signal):
+   ├─ re-fetch ActiveChatWindow                    ← now contains every bursted user msg
+   ├─ build prompt + run tool-loop with signal
+   ├─ if signal.aborted at any await point → exit silently
+   └─ on success: send response, persist trail, compact, archive-on-terminal
+```
+
+**Why interrupts, not rate limits.** A rate limiter would *drop* burst messages, losing user intent. Coalescing keeps every message in the chat window (so the LLM sees the full burst), but elides the redundant LLM calls a naïve "respond per message" loop would produce. The result: one reply to a flurry of "wait, also add X", "and Y", "actually never mind Y" — which is what users expect in chat.
+
+**Defaults.** `JITTER_BASE_MS = 250`, `JITTER_RANGE_MS = 250`. Tunable via constants in `agent/coalescer.ts`.
+
+**Process-local.** The in-flight map is per-bot-instance. Multi-instance deployments need a Redis-backed variant keyed by `coalesce:{platform}:{groupId}` with a fencing token; today the per-session lock at the write boundary prevents corruption, but redundant LLM calls can fire across instances.
+
+**Interaction with the queue.** BullMQ retries (`attempts: QUEUE_ATTEMPTS`, exponential backoff) sit *outside* the coalescer: a job that throws a non-abort error retries with a fresh coalesce attempt. Aborts due to coalescing are not errors — the surviving turn already sent the response.
+
 ---
 
 ## 8. Tool Layer
@@ -536,18 +567,31 @@ All tools are defined in a central registry with Zod schemas. The LLM never call
 
 ### 8.1 Swiggy MCP Tools
 
-Thin wrappers around the Swiggy MCP servers via `@modelcontextprotocol/sdk`.
+Thin wrappers around the Swiggy Food MCP server via `@modelcontextprotocol/sdk`. Names mirror the upstream MCP exactly — auth and coordinates are supplied automatically by the MCP session, so the wrappers pass arguments straight through.
 
 ```typescript
 type SwiggyTool =
-  | "swiggy_search_restaurants"
-  | "swiggy_get_menu"
-  | "swiggy_get_dish_details"
-  | "swiggy_check_availability"
-  | "swiggy_apply_coupon"
-  | "swiggy_place_order"
-  | "swiggy_track_order"
+  // Discover
+  | "get_addresses"
+  | "search_restaurants"
+  | "search_menu"
+  | "get_restaurant_menu"
+  // Cart
+  | "fetch_food_coupons"
+  | "apply_food_coupon"
+  | "flush_food_cart"
+  | "get_food_cart"
+  | "update_food_cart"
+  | "place_food_order"
+  // Track
+  | "get_food_orders"
+  | "get_food_order_details"
+  | "track_food_order"
+  // Support
+  | "report_error"
 ```
+
+**Address-first flow.** `get_addresses` is always the first call; the user picks an `addressId` and every subsequent tool takes it. **Cart is server-side**: `update_food_cart` mutates Swiggy's cart state, so always follow it with `get_food_cart` to render the current contents. **Order placement** is gated to cart total < ₹1000 by the Swiggy MCP itself; cancellations are not API-callable and must be routed to Swiggy customer care (080-67466729).
 
 ### 8.2 Session Tools
 
@@ -1109,14 +1153,14 @@ interface SwiggyMCPConfig {
 **Core ordering flow:**
 
 ```
-Browse:  search_restaurants → get_menu → get_dish_details
-Cart:    build_cart → check_availability → apply_coupon
-Order:   place_order (with idempotency key) → track_order
+Discover:  get_addresses → search_restaurants → search_menu
+Cart:      update_food_cart → get_food_cart → fetch_food_coupons → apply_food_coupon
+Order:     place_food_order
+Track:     track_food_order  (with or without orderId)
+           get_food_order_details  (full breakdown of one order)
 ```
 
-**Idempotency on placement:**
-
-The `idempotencyKey` field on `OrderSession` is generated once when the session transitions to `PLACING`. It is passed to Swiggy on every order attempt. Retries on network failure use the same key — no double orders.
+**No idempotency key.** The Swiggy MCP `place_food_order` signature is `{addressId, paymentMethod?}` — there is no client-side idempotency parameter. Double-order safety relies on (a) the per-group session lock so only one worker drives a given session at a time, (b) the orchestrator's coalescer (§7.4) ensuring a burst of trigger messages produces a single LLM turn, and (c) the LLM's mandatory user-confirmation step before invoking `place_food_order`. Once placed, `swiggyOrderId` is stored on the session and the LLM transitions the state to `complete`.
 
 ---
 
@@ -1469,8 +1513,8 @@ supper-bot/
 ├── docker-compose.yml                      # development + self-hosting
 ├── docker-compose.prod.yml                 # production overrides
 ├── .env.example
-├── package.json                            # pnpm workspace root
-├── bun.lockb
+├── package.json                            # bun workspace root
+├── bun.lock
 ├── biome.json
 ├── tsconfig.base.json
 ├── LICENSE                                 # MIT
@@ -1498,4 +1542,4 @@ supper-bot/
 | Testing | `bun test` | Built-in, zero config |
 | Linting | Biome | Replaces ESLint + Prettier |
 | Container | `oven/bun:1-alpine` | Small image, single binary |
-| Monorepo | pnpm workspaces | `apps/bot` + `packages/types` |
+| Monorepo | Bun workspaces | `apps/bot` + `packages/types` (single-runtime: `bun install`, `bun test`, `bun run`) |

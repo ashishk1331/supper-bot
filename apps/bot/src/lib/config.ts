@@ -36,6 +36,7 @@ const ConfigSchema = z
     VOTING_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(10),
     MEMORY_RETENTION_DAYS: z.coerce.number().int().positive().default(365),
     AMBIENT_BUFFER_SIZE: z.coerce.number().int().positive().default(20),
+    AMBIENT_BUFFER_TTL_MINUTES: z.coerce.number().int().positive().default(30),
     DEFAULT_TIMEZONE: z.string().default("Asia/Kolkata"),
     PORT: z.coerce.number().int().positive().default(3000),
 

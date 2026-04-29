@@ -19,11 +19,11 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
 
 const registry = new Map<string, ToolDefinition>()
 
-export function registerTool(tool: ToolDefinition): void {
+export function registerTool<TInput, TOutput>(tool: ToolDefinition<TInput, TOutput>): void {
   if (registry.has(tool.name)) {
     throw new Error(`Tool already registered: ${tool.name}`)
   }
-  registry.set(tool.name, tool)
+  registry.set(tool.name, tool as ToolDefinition)
 }
 
 export function getTool(name: string): ToolDefinition | undefined {

@@ -1,8 +1,11 @@
 import { loadConfig } from "@/lib/config"
 import { SessionStateError } from "@/lib/errors"
 import { newHumanId } from "@/lib/id"
-import { sessionLockKey } from "@/memory/keys"
+import { getLogger } from "@/lib/logger"
+import { persistArchivedSession } from "@/memory/archive-store"
+import { sessionCreateLockKey, sessionLockKey } from "@/memory/keys"
 import { withLock } from "@/memory/locks"
+import { getMemoryService } from "@/memory/service"
 import {
   getChatWindow,
   deleteSession as wmDeleteSession,
@@ -32,38 +35,41 @@ function sessionExpiresAt(): Date {
 }
 
 export async function createSession(input: NewSessionInput): Promise<OrderSession> {
-  const existing = await wmGetSession(input.platform, input.groupId)
-  if (existing && !TERMINAL_STATES.has(existing.state)) {
-    throw new SessionStateError(
-      `active session ${existing.sessionId} already exists for ${input.platform}:${input.groupId}`,
-    )
-  }
-  const now = new Date()
-  const session: OrderSession = {
-    sessionId: newHumanId(),
-    orderId: newHumanId(),
-    platform: input.platform,
-    groupId: input.groupId,
-    state: "browsing",
-    partyLeader: input.partyLeader,
-    members: {
-      [input.partyLeader.userId]: {
-        userId: input.partyLeader.userId,
-        displayName: input.partyLeader.displayName,
-        items: [],
-        confirmed: false,
-        optedOut: false,
-        lastActiveAt: now,
+  // Group-scoped creation lock so two parallel "first messages" can't both
+  // pass the existence check and race a write.
+  return withLock(sessionCreateLockKey(input.platform, input.groupId), async () => {
+    const existing = await wmGetSession(input.platform, input.groupId)
+    if (existing && !TERMINAL_STATES.has(existing.state)) {
+      // The other racer already created an active session — return it instead
+      // of throwing, so callers using ensureSession-style semantics succeed.
+      return existing
+    }
+    const now = new Date()
+    const session: OrderSession = {
+      sessionId: newHumanId(),
+      orderId: newHumanId(),
+      platform: input.platform,
+      groupId: input.groupId,
+      state: "browsing",
+      partyLeader: input.partyLeader,
+      members: {
+        [input.partyLeader.userId]: {
+          userId: input.partyLeader.userId,
+          displayName: input.partyLeader.displayName,
+          items: [],
+          confirmed: false,
+          optedOut: false,
+          lastActiveAt: now,
+        },
       },
-    },
-    trackedMessages: {},
-    idempotencyKey: "",
-    createdAt: now,
-    updatedAt: now,
-    expiresAt: sessionExpiresAt(),
-  }
-  await wmSetSession(session)
-  return session
+      trackedMessages: {},
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: sessionExpiresAt(),
+    }
+    await wmSetSession(session)
+    return session
+  })
 }
 
 export async function loadSession(
@@ -109,9 +115,47 @@ export async function transitionSession(
   return mutateSession(platform, groupId, (s) => {
     assertTransition(s.state, next)
     s.state = next
-    if (next === "placing" && !s.idempotencyKey) {
-      s.idempotencyKey = newHumanId()
+    if (TERMINAL_STATES.has(next)) {
+      s.closedAt = new Date()
     }
+  })
+}
+
+/** Mark the next outbound response so the orchestrator tracks its messageId. */
+export async function setPendingTrackIntent(
+  platform: Platform,
+  groupId: string,
+  intent: NonNullable<OrderSession["pendingTrackIntent"]>,
+): Promise<OrderSession> {
+  return mutateSession(platform, groupId, (s) => {
+    s.pendingTrackIntent = intent
+  })
+}
+
+export async function clearPendingTrackIntent(
+  platform: Platform,
+  groupId: string,
+): Promise<OrderSession> {
+  return mutateSession(platform, groupId, (s) => {
+    s.pendingTrackIntent = undefined
+  })
+}
+
+/**
+ * Atomic combo: record the upstream Swiggy order id and transition state in
+ * a single locked mutation, so a partial failure can't leave the session
+ * with the id set but the wrong state.
+ */
+export async function recordSwiggyOrder(
+  platform: Platform,
+  groupId: string,
+  swiggyOrderId: string,
+  next: SessionState = "complete",
+): Promise<OrderSession> {
+  return mutateSession(platform, groupId, (s) => {
+    assertTransition(s.state, next)
+    s.swiggyOrderId = swiggyOrderId
+    s.state = next
     if (TERMINAL_STATES.has(next)) {
       s.closedAt = new Date()
     }
@@ -276,7 +320,11 @@ export async function archiveSession(
     createdAt: session.createdAt,
   }
 
-  // Persistence to Postgres lands in Layer 5; we still clean up the FalkorDB keys.
+  await persistArchivedSession(archived)
   await wmDeleteSession(platform, groupId)
+  // Fire-and-forget: extraction + persistence runs asynchronously per §12.2.
+  getMemoryService()
+    .extractAndPersist(archived)
+    .catch((err) => getLogger().error({ err, sessionId: archived.sessionId }, "extraction failed"))
   return archived
 }

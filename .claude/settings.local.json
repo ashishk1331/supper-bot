@@ -5,7 +5,12 @@
       "Bash(pnpm --version)",
       "PowerShell(bun *)",
       "PowerShell(Stop-Process *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(bun run *)",
+      "Bash(bunx biome *)",
+      "Bash(bun test *)",
+      "Bash(echo \"exit=$?\")",
+      "WebFetch(domain:mcp.swiggy.com)"
     ]
   }
 }

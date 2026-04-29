@@ -1,21 +1,3 @@
-import type { UnifiedEvent } from "./events"
-import type { GroupContext, UserContext } from "./memory"
-import type { ActiveChatWindow, OrderSession } from "./session"
-
-export interface ToolDefinitionMeta {
-  name: string
-  description: string
-}
-
-export interface AgentInput {
-  trigger: UnifiedEvent
-  session: OrderSession
-  chatWindow: ActiveChatWindow
-  userContext: UserContext
-  groupContext: GroupContext
-  availableTools: ToolDefinitionMeta[]
-}
-
 export interface RichBlock {
   kind: string
   payload: Record<string, unknown>

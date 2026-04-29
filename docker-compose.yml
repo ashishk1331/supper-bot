@@ -1,0 +1,54 @@
+services:
+  bot:
+    image: supper-bot/bot:latest
+    build:
+      context: .
+      dockerfile: apps/bot/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-supper}:${DB_PASSWORD:-changeme}@postgres:5432/${DB_NAME:-supper_bot}
+      FALKORDB_URL: redis://falkordb:6379
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${DB_NAME:-supper_bot}
+      POSTGRES_USER: ${DB_USER:-supper}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-supper}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    volumes:
+      - falkordata:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  falkordata:

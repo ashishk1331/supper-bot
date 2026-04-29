@@ -30,7 +30,6 @@ const sampleSession: OrderSession = {
   trackedMessages: {
     M1: { messageId: "M1", sessionId: "swift-mango-lands", intent: "voting_summary" },
   },
-  idempotencyKey: "",
   createdAt: new Date("2026-04-29T10:00:00.000Z"),
   updatedAt: new Date("2026-04-29T10:15:00.000Z"),
   expiresAt: new Date("2026-04-29T12:00:00.000Z"),

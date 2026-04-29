@@ -59,15 +59,6 @@ export const KnownReactionMappings = {
   DOWNVOTE: ["😐", "thumbsdown"],
 } as const
 
-export const AlwaysPreserveEvents = [
-  "order_placement",
-  "party_leader_change",
-  "member_opt_out",
-  "address_confirmed",
-  "restaurant_locked",
-  "vote_result",
-] as const
-
 export const DefaultTokenBudget = {
   total: 180_000,
   reserved: {
